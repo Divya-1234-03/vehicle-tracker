@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Vehicle Tracker - Smooth Animation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; font-family: -apple-system, Roboto, sans-serif; }
+    #map { height: 100vh; width: 100vw; }
+
+    .search-bar, .category-bar, .layers-btn, .status, .info-box, .fab-controls, .progress-bar {
+      z-index: 1000;
+      position: absolute;
+    }
+
+    .search-bar {
+      top: 10px; left: 50%; transform: translateX(-50%);
+      background: #fff; padding: 8px 16px; border-radius: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1); font-size: 15px;
+    }
+
+    .category-bar {
+      top: 55px; left: 50%; transform: translateX(-50%);
+      background: #fff; display: flex; gap: 8px;
+      padding: 6px 12px; border-radius: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+    .category-bar div {
+      padding: 4px 10px; border-radius: 12px;
+      background: #f0f0f0; font-size: 13px;
+    }
+
+    .layers-btn {
+      bottom: 20px; left: 20px;
+      background: #fff; padding: 6px 10px;
+      border-radius: 8px; box-shadow: 0 1px 5px rgba(0,0,0,0.1);
+      font-size: 13px;
+    }
+
+    .status {
+      top: 100px; right: 20px;
+      background: #007aff; color: #fff;
+      padding: 4px 12px; border-radius: 20px;
+      font-size: 13px;
+    }
+
+    .info-box {
+      bottom: 70px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7); color: #fff;
+      padding: 6px 10px; font-size: 13px;
+      border-radius: 8px; display: flex; gap: 14px;
+    }
+
+    .progress-bar {
+      bottom: 0; left: 0; width: 100%;
+      height: 4px; background: #ccc;
+    }
+
+    .progress {
+      height: 100%; width: 0%; background: #00bfff;
+    }
+
+    .fab-controls {
+      bottom: 20px; right: 20px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .fab-controls button {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: #fff; border: none; font-size: 20px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.2);
+      cursor: pointer;
+    }
+
+    .dark-mode .leaflet-tile {
+      filter: invert(92%) hue-rotate(180deg) brightness(0.95);
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="search-bar">🔍 Search Map</div>
+<div class="category-bar">
+  <div>Food 🍱</div>
+  <div>Nature 🌿</div>
+  <div>Shops 🛒</div>
+</div>
+<div class="layers-btn">🗺️ Layers</div>
+<div class="status" id="status">Status: Paused</div>
+<div class="info-box">
+  <div>📌 <span id="coord">-</span></div>
+  <div>⏱ <span id="time">-</span></div>
+  <div>🚀 <span id="speed">-</span></div>
+  <div>📏 <span id="distance">-</span></div>
+</div>
+<div class="progress-bar"><div class="progress" id="progress"></div></div>
+<div class="fab-controls">
+  <button onclick="play()">▶️</button>
+  <button onclick="pause()">⏸️</button>
+  <button onclick="replay()">🔁</button>
+  <button onclick="zoomToVehicle()">📍</button>
+  <button onclick="toggleDark()">🌙</button>
+</div>
+
+<script>
+const dummyRoute = [
+  { lat: 17.385044, lon: 78.486671, timestamp: "2024-07-20T10:00:00Z" },
+  { lat: 17.385048, lon: 78.486675, timestamp: "2024-07-20T10:00:05Z" },
+  { lat: 17.385051, lon: 78.486682, timestamp: "2024-07-20T10:00:10Z" },
+  { lat: 17.385056, lon: 78.486690, timestamp: "2024-07-20T10:00:15Z" },
+  { lat: 17.385065, lon: 78.486700, timestamp: "2024-07-20T10:00:20Z" }
+];
+
+let i = 0;
+let progress = 0;
+let marker, polyline, map;
+let animating = false;
+let line = [];
+
+map = L.map('map').setView([17.385044, 78.486671], 17);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CartoDB',
+  subdomains: 'abcd',
+  maxZoom: 19
+}).addTo(map);
+
+marker = L.marker([dummyRoute[0].lat, dummyRoute[0].lon]).addTo(map);
+polyline = L.polyline([], { color: '#00bfff', weight: 4 }).addTo(map);
+
+function animateMove(from, to, duration = 1000) {
+  const start = performance.now();
+  function frame(now) {
+    const progress = Math.min((now - start) / duration, 1);
+    const lat = from.lat + (to.lat - from.lat) * progress;
+    const lon = from.lon + (to.lon - from.lon) * progress;
+    marker.setLatLng([lat, lon]);
+    if (progress < 1 && animating) requestAnimationFrame(frame);
+    else {
+      updateInfo(i, to);
+      i++;
+      if (i < dummyRoute.length && animating) {
+        polyline.addLatLng([to.lat, to.lon]);
+        animateMove(to, dummyRoute[i]);
+      } else {
+        pause();
+      }
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function updateInfo(index, point) {
+  document.getElementById("coord").textContent = `${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}`;
+  document.getElementById("time").textContent = point.timestamp;
+  document.getElementById("status").textContent = "Status: Moving";
+
+  if (index > 0) {
+    const prev = dummyRoute[index - 1];
+    const d = getDistance(prev.lat, prev.lon, point.lat, point.lon);
+    const t = (new Date(point.timestamp) - new Date(prev.timestamp)) / 3600000;
+    document.getElementById("speed").textContent = `${(d / t).toFixed(2)} km/h`;
+  }
+
+  let left = 0;
+  for (let j = index; j < dummyRoute.length - 1; j++) {
+    left += getDistance(dummyRoute[j].lat, dummyRoute[j].lon, dummyRoute[j + 1].lat, dummyRoute[j + 1].lon);
+  }
+  document.getElementById("distance").textContent = `${left.toFixed(2)} km`;
+  document.getElementById("progress").style.width = `${(index / (dummyRoute.length - 1)) * 100}%`;
+}
+
+function play() {
+  if (animating || i >= dummyRoute.length - 1) return;
+  animating = true;
+  animateMove(dummyRoute[i], dummyRoute[i + 1]);
+}
+
+function pause() {
+  animating = false;
+  document.getElementById("status").textContent = "Status: Paused";
+}
+
+function replay() {
+  pause();
+  i = 0;
+  polyline.setLatLngs([]);
+  marker.setLatLng([dummyRoute[0].lat, dummyRoute[0].lon]);
+  updateInfo(0, dummyRoute[0]);
+  play();
+}
+
+function zoomToVehicle() {
+  const p = dummyRoute[Math.min(i, dummyRoute.length - 1)];
+  map.setView([p.lat, p.lon], 17);
+}
+
+function toggleDark() {
+  map.getContainer().classList.toggle("dark-mode");
+}
+
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+</script>
+</body>
+</html>
